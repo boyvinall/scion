@@ -607,6 +607,8 @@
           "properties": {
             "api_endpoint": { "type": "string", "description": "ateapi Control gRPC endpoint, e.g. \"api.ate-system.svc:443\"." },
             "router_endpoint": { "type": "string", "description": "atenet-router inbound endpoint, e.g. \"http://atenet-router.ate-system.svc:80\"." },
+            "router_ca_file": { "type": "string", "description": "Path to a PEM CA bundle verifying an https router_endpoint." },
+            "router_credential_bundle": { "type": "string", "description": "Path to a PEM client certificate and key presented to an https router_endpoint." },
             "token_audience": { "type": "string", "description": "TokenRequest audience for ateapi auth. Defaults to \"api.ate-system.svc\"." },
             "ca_file": { "type": "string", "description": "Path to a PEM CA bundle verifying the ateapi Control gRPC dial. Used when cluster_trust_bundle is empty." },
             "cluster_trust_bundle": { "type": "string", "description": "Name of a certificates.k8s.io ClusterTrustBundle verifying the ateapi Control gRPC dial. Takes precedence over ca_file." },

@@ -2933,6 +2933,12 @@ type V1SubstrateConfig struct {
 	// (APIEndpoint), not to this one, and there is no separate TLS setting
 	// for it (see substrate-runtime.md §10).
 	RouterEndpoint string `json:"router_endpoint,omitempty" yaml:"router_endpoint,omitempty" koanf:"router_endpoint"`
+	// RouterCAFile is a PEM CA bundle verifying an https RouterEndpoint.
+	RouterCAFile string `json:"router_ca_file,omitempty" yaml:"router_ca_file,omitempty" koanf:"router_ca_file"`
+	// RouterCredentialBundle is a PEM file holding the client certificate
+	// and key presented to an https RouterEndpoint, such as a projected
+	// Substrate pod identity certificate.
+	RouterCredentialBundle string `json:"router_credential_bundle,omitempty" yaml:"router_credential_bundle,omitempty" koanf:"router_credential_bundle"`
 	// TokenAudience is the audience requested for the in-cluster
 	// ServiceAccount TokenRequest used to authenticate to the ateapi
 	// Control API. Defaults to "api.ate-system.svc" when empty.

@@ -16,8 +16,12 @@ package substrate
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -71,4 +75,40 @@ func (c *RouterClient) Do(ctx context.Context, atespace, actor, method, path str
 		client = http.DefaultClient
 	}
 	return client.Do(req)
+}
+
+// NewMTLSRouterClient returns a RouterClient for an https router endpoint
+// that verifies the router against caFile and presents the cert and key in
+// credentialBundleFile. The bundle is re-read on every handshake because a
+// projected pod certificate rotates in place.
+func NewMTLSRouterClient(endpoint, caFile, credentialBundleFile string) (*RouterClient, error) {
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("substrate: read router CA file: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("substrate: router CA file %s holds no PEM certificates", caFile)
+	}
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    roots,
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			bundle, err := os.ReadFile(credentialBundleFile)
+			if err != nil {
+				return nil, fmt.Errorf("substrate: read router credential bundle: %w", err)
+			}
+			cert, err := tls.X509KeyPair(bundle, bundle)
+			if err != nil {
+				return nil, fmt.Errorf("substrate: parse router credential bundle: %w", err)
+			}
+			return &cert, nil
+		},
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+	return &RouterClient{
+		Endpoint:   strings.TrimRight(endpoint, "/"),
+		HTTPClient: &http.Client{Transport: transport},
+	}, nil
 }

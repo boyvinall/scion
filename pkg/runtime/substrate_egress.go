@@ -362,7 +362,9 @@ func hostFromURL(raw string) string {
 // buildEgressPolicy builds the CreateActorEgressPolicyRequest for actor
 // atespace/actorName, with a single EgressRule matching any of hostnames
 // (substrate-runtime.md §7). "default" is the only permitted egress
-// policy resource name per the EgressPolicy proto comment.
+// policy resource name per the EgressPolicy proto comment. The rule is TLS
+// passthrough on 443 because Substrate's https rules intercept TLS, which
+// needs egress_trust_bundle in the actor.
 func buildEgressPolicy(atespace, actorName string, hostnames []string) *ateapipb.CreateActorEgressPolicyRequest {
 	return &ateapipb.CreateActorEgressPolicyRequest{
 		Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
@@ -370,7 +372,10 @@ func buildEgressPolicy(atespace, actorName string, hostnames []string) *ateapipb
 			Metadata: &ateapipb.ResourceMetadata{Atespace: atespace, Name: "default"},
 			Rules: []*ateapipb.EgressRule{
 				{
-					Hostnames: &ateapipb.HostnameRule{Patterns: hostnames},
+					TlsPassthrough: &ateapipb.TlsPassthroughRule{
+						Hostnames: hostnames,
+						Ports:     &ateapipb.Ports{Numbers: []int32{443}},
+					},
 				},
 			},
 		},

@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/scion/third_party/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // substrateServeEntrypointVersion is folded into the template's
@@ -87,9 +88,9 @@ const substrateWakeupProbeTimeoutSeconds = 120
 //
 // A fresh value on every call, so no caller can mutate a shared probe and
 // change what substrateTemplateName hashes without changing its input.
-func substrateWakeupProbe() *ateapipb.ContainerWakeupProbe {
-	return &ateapipb.ContainerWakeupProbe{
-		HttpGet: &ateapipb.HTTPGetAction{
+func substrateWakeupProbe() *ateapipb.WakeupProbe {
+	return &ateapipb.WakeupProbe{
+		HttpGet: &ateapipb.HttpGetAction{
 			Path: substrateHealthzPath,
 			Port: substrateServePort,
 		},
@@ -221,16 +222,31 @@ func resourcesCacheKey(r *api.ResourceSpec) string {
 		r.Requests.CPU, r.Requests.Memory, r.Limits.CPU, r.Limits.Memory, r.Disk)
 }
 
-// substrateSandboxClass maps the config string ("gvisor"/"microvm", default
-// gvisor) to the proto enum.
-func substrateSandboxClass(name string) ateapipb.SandboxClass {
-	switch name {
-	case "microvm":
-		return ateapipb.SandboxClass_SANDBOX_CLASS_MICROVM
-	default:
-		return ateapipb.SandboxClass_SANDBOX_CLASS_GVISOR
+// substrateLimits converts Kubernetes-style quantities ("2", "500m", "4Gi")
+// to the integer millicores and bytes Substrate's Resources takes. Substrate
+// requires both, so unset limits fall back to the defaults below.
+func substrateLimits(cpu, memory string) (*ateapipb.Resources, error) {
+	if cpu == "" {
+		cpu = substrateDefaultCPU
 	}
+	if memory == "" {
+		memory = substrateDefaultMemory
+	}
+	cpuQ, err := resource.ParseQuantity(cpu)
+	if err != nil {
+		return nil, fmt.Errorf("substrate: cpu limit %q: %w", cpu, err)
+	}
+	memQ, err := resource.ParseQuantity(memory)
+	if err != nil {
+		return nil, fmt.Errorf("substrate: memory limit %q: %w", memory, err)
+	}
+	return &ateapipb.Resources{CpuMillicores: cpuQ.MilliValue(), MemoryBytes: memQ.Value()}, nil
 }
+
+const (
+	substrateDefaultCPU    = "2"
+	substrateDefaultMemory = "2Gi"
+)
 
 // substrateTrustBundleMountPath is the fixed, non-secret mount path for the
 // projected trust-bundle system-info volume. Kept as a constant, not derived
@@ -257,17 +273,14 @@ const substrateTrustBundleFile = substrateTrustBundleMountPath + "/" + substrate
 // POST /scion/v1/bootstrap) — the only Env this function ever sets is the
 // fixed set of CA-bundle paths below, and only when
 // sc.EgressTrustBundle is non-empty.
-func buildActorTemplate(atespace, templateName, imageDigest string, sc config.V1SubstrateConfig, resources *api.ResourceSpec) *ateapipb.ActorTemplate {
+func buildActorTemplate(atespace, templateName, imageDigest string, sc config.V1SubstrateConfig, resources *api.ResourceSpec) (*ateapipb.ActorTemplate, error) {
 	if resources == nil {
 		resources = config.BuiltinDefaultResources()
 	}
 
-	var limits []*ateapipb.Limits
-	if resources.Limits.CPU != "" {
-		limits = append(limits, &ateapipb.Limits{Name: "cpu", Quantity: resources.Limits.CPU})
-	}
-	if resources.Limits.Memory != "" {
-		limits = append(limits, &ateapipb.Limits{Name: "memory", Quantity: resources.Limits.Memory})
+	limits, err := substrateLimits(resources.Limits.CPU, resources.Limits.Memory)
+	if err != nil {
+		return nil, err
 	}
 
 	// env, volumes, and volumeMounts for the projected egress-gateway trust
@@ -285,8 +298,8 @@ func buildActorTemplate(atespace, templateName, imageDigest string, sc config.V1
 					DataSources: []*ateapipb.SystemInfoDataSource{
 						{
 							TrustBundle: &ateapipb.TrustBundleDataSource{
-								Name: sc.EgressTrustBundle,
-								Path: substrateTrustBundleFileName,
+								Names: []string{sc.EgressTrustBundle},
+								Path:  substrateTrustBundleFileName,
 							},
 						},
 					},
@@ -389,7 +402,7 @@ func buildActorTemplate(atespace, templateName, imageDigest string, sc config.V1
 						Add: slices.Clone(substrateContainerCapabilitiesAdd),
 					},
 				},
-				Resources: &ateapipb.Resources{Limits: limits},
+				Resources: &ateapipb.ResourceRequirements{Limits: limits},
 				// Gates every wakeup, including the golden actor's first
 				// boot, on substrate-serve answering healthz. See
 				// substrateWakeupProbe for what it checks and
@@ -400,14 +413,10 @@ func buildActorTemplate(atespace, templateName, imageDigest string, sc config.V1
 		Volumes: append([]*ateapipb.Volume{
 			{Name: "workspace", DurableDir: &ateapipb.DurableDirVolumeSource{}},
 		}, trustBundleVolumes...),
-		SnapshotsConfig: &ateapipb.SnapshotsConfig{
-			OnPause:         ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_DATA,
-			OnCommit:        ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_DATA,
-			StorageLocation: sc.SnapshotStorage,
-		},
-		SandboxConfig: &ateapipb.SandboxConfig{
-			SandboxClass: substrateSandboxClass(sc.SandboxClass),
-			ConfigName:   sc.SandboxConfigName,
+		Resources: &ateapipb.ResourceRequirements{Limits: limits},
+		SnapshotConfig: &ateapipb.SnapshotConfig{
+			StorageLocation:   sc.SnapshotStorage,
+			PreferredFidelity: ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES,
 		},
 	}
 
@@ -415,7 +424,7 @@ func buildActorTemplate(atespace, templateName, imageDigest string, sc config.V1
 		tmpl.WorkerSelector = &ateapipb.Selector{MatchLabels: sc.WorkerSelector}
 	}
 
-	return tmpl
+	return tmpl, nil
 }
 
 // templateReadyTimeout resolves V1SubstrateConfig.TemplateReadyTimeout,

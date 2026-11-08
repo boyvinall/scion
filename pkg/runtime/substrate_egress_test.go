@@ -320,10 +320,10 @@ func TestBuildEgressPolicy_PatternsMatchInputVerbatim(t *testing.T) {
 	if len(rules) != 1 {
 		t.Fatalf("buildEgressPolicy() = %d rules, want 1", len(rules))
 	}
-	if rules[0].GetCidrs() != nil {
-		t.Errorf("buildEgressPolicy() set a CIDRRule; it never sends one")
+	if got := rules[0].GetTlsPassthrough().GetPorts().GetNumbers(); len(got) != 1 || got[0] != 443 {
+		t.Errorf("buildEgressPolicy() ports = %v, want [443]", got)
 	}
-	patterns := rules[0].GetHostnames().GetPatterns()
+	patterns := rules[0].GetTlsPassthrough().GetHostnames()
 	if len(patterns) != len(hostnames) {
 		t.Fatalf("buildEgressPolicy() patterns = %v, want exactly %v", patterns, hostnames)
 	}
@@ -350,7 +350,7 @@ func TestSubstrateEgressPolicy_EndToEndNoIPPatterns(t *testing.T) {
 		t.Fatalf("substrateEgressHostnames() error = %v", hostsErr)
 	}
 	req := buildEgressPolicy("scion-proj", "agent-a", hosts)
-	patterns := req.GetEgressPolicy().GetRules()[0].GetHostnames().GetPatterns()
+	patterns := req.GetEgressPolicy().GetRules()[0].GetTlsPassthrough().GetHostnames()
 
 	if containsHost(patterns, "8.8.8.8") || containsHost(patterns, "10.0.0.0/8") {
 		t.Errorf("HostnameRule.patterns = %v, an IP/CIDR egress_allow entry reached it", patterns)

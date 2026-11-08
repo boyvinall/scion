@@ -307,11 +307,20 @@ func newSubstrateRuntimeFromConfig(sc config.V1SubstrateConfig) (*SubstrateRunti
 		return nil, err
 	}
 
+	router := substrate.NewRouterClient(sc.RouterEndpoint)
+	if sc.RouterCAFile != "" || sc.RouterCredentialBundle != "" {
+		router, err = substrate.NewMTLSRouterClient(sc.RouterEndpoint, sc.RouterCAFile, sc.RouterCredentialBundle)
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+	}
+
 	return &SubstrateRuntime{
 		cfg:            sc,
 		client:         substrate.NewControlClient(conn),
 		conn:           conn,
-		router:         substrate.NewRouterClient(sc.RouterEndpoint),
+		router:         router,
 		k8sClient:      k8sClient.Clientset,
 		now:            time.Now,
 		sleep:          time.Sleep,
@@ -438,7 +447,10 @@ func (r *SubstrateRuntime) Run(ctx context.Context, cfg RunConfig) (string, erro
 
 	// Step 3: content-addressed template, created + waited-ready if new.
 	templateName := substrateTemplateName(cfg.Image, r.cfg, cfg.Resources)
-	tmpl := buildActorTemplate(atespace, templateName, cfg.Image, r.cfg, cfg.Resources)
+	tmpl, err := buildActorTemplate(atespace, templateName, cfg.Image, r.cfg, cfg.Resources)
+	if err != nil {
+		return "", r.redact(cfg, err)
+	}
 	if err := ensureActorTemplate(ctx, r.client, atespace, templateName, tmpl, templateReadyTimeout(r.cfg), r.sleep); err != nil {
 		return "", r.redact(cfg, err)
 	}
@@ -472,8 +484,7 @@ func (r *SubstrateRuntime) Run(ctx context.Context, cfg RunConfig) (string, erro
 			Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
 		})
 		_, _ = r.client.DeleteActor(cleanupCtx, &ateapipb.DeleteActorRequest{
-			Actor:    &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
-			AnyState: true,
+			Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
 		})
 	}
 
@@ -644,8 +655,7 @@ func (r *SubstrateRuntime) Delete(ctx context.Context, ref RunRef) error {
 	}
 
 	deletedActor, err := r.client.DeleteActor(ctx, &ateapipb.DeleteActorRequest{
-		Actor:    &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
-		AnyState: true,
+		Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
 	})
 	if err != nil && status.Code(err) != codes.NotFound {
 		return fmt.Errorf("substrate: delete actor %s: %w", id, err)
@@ -750,7 +760,7 @@ func (r *SubstrateRuntime) List(ctx context.Context, labelFilter map[string]stri
 		if page >= maxActorListPages {
 			return nil, fmt.Errorf("substrate: list actors: exceeded %d pages", maxActorListPages)
 		}
-		resp, err := r.client.ListActors(ctx, &ateapipb.ListActorsRequest{PageToken: pageToken})
+		resp, err := r.client.ListActors(ctx, &ateapipb.ListActorsRequest{Options: &ateapipb.ListOptions{PageToken: pageToken}})
 		if err != nil {
 			return nil, fmt.Errorf("substrate: list actors: %w", err)
 		}
@@ -937,7 +947,7 @@ func (r *SubstrateRuntime) RecordlessActors(ctx context.Context, projectID strin
 		if page >= maxRecordlessActorListPages {
 			return atespace, nil, fmt.Errorf("substrate: list actors in atespace %s: exceeded %d pages", atespace, maxRecordlessActorListPages)
 		}
-		resp, err := r.client.ListActors(ctx, &ateapipb.ListActorsRequest{Atespace: atespace, PageToken: pageToken})
+		resp, err := r.client.ListActors(ctx, &ateapipb.ListActorsRequest{Atespace: atespace, Options: &ateapipb.ListOptions{PageToken: pageToken}})
 		if err != nil {
 			return atespace, nil, fmt.Errorf("substrate: list actors in atespace %s: %w", atespace, err)
 		}
@@ -1073,9 +1083,9 @@ func substratePhase(s ateapipb.ActorState) string {
 		return "provisioning"
 	case ateapipb.ActorState_ACTOR_STATE_RUNNING:
 		return "running"
-	case ateapipb.ActorState_ACTOR_STATE_SUSPENDING, ateapipb.ActorState_ACTOR_STATE_PAUSING:
+	case ateapipb.ActorState_ACTOR_STATE_SUSPENDING:
 		return "stopping"
-	case ateapipb.ActorState_ACTOR_STATE_SUSPENDED, ateapipb.ActorState_ACTOR_STATE_PAUSED:
+	case ateapipb.ActorState_ACTOR_STATE_SUSPENDED:
 		return "stopped"
 	case ateapipb.ActorState_ACTOR_STATE_CRASHED:
 		return "error"

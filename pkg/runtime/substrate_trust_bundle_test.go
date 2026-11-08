@@ -52,7 +52,7 @@ func TestBuildActorTemplate_EgressTrustBundleUnset_MatchesPreChangeGolden(t *tes
 	}
 	resources := &api.ResourceSpec{Limits: api.ResourceList{CPU: "2", Memory: "4Gi"}}
 
-	got := buildActorTemplate("scion-test", "scion-abc123", image, sc, resources)
+	got := mustBuildActorTemplate(t, "scion-test", "scion-abc123", image, sc, resources)
 
 	want := &ateapipb.ActorTemplate{
 		Metadata: &ateapipb.ResourceMetadata{Atespace: "scion-test", Name: "scion-abc123"},
@@ -68,12 +68,12 @@ func TestBuildActorTemplate_EgressTrustBundleUnset_MatchesPreChangeGolden(t *tes
 				SecurityContext: &ateapipb.SecurityContext{
 					Capabilities: &ateapipb.Capabilities{Add: slices.Clone(substratecaps.Names())},
 				},
-				Resources: &ateapipb.Resources{Limits: []*ateapipb.Limits{
-					{Name: "cpu", Quantity: "2"},
-					{Name: "memory", Quantity: "4Gi"},
+				Resources: &ateapipb.ResourceRequirements{Limits: &ateapipb.Resources{
+					CpuMillicores: 2000,
+					MemoryBytes:   4 << 30,
 				}},
-				WakeupProbe: &ateapipb.ContainerWakeupProbe{
-					HttpGet:        &ateapipb.HTTPGetAction{Path: "/scion/v1/healthz", Port: 80},
+				WakeupProbe: &ateapipb.WakeupProbe{
+					HttpGet:        &ateapipb.HttpGetAction{Path: "/scion/v1/healthz", Port: 80},
 					TimeoutSeconds: 120,
 				},
 			},
@@ -81,14 +81,13 @@ func TestBuildActorTemplate_EgressTrustBundleUnset_MatchesPreChangeGolden(t *tes
 		Volumes: []*ateapipb.Volume{
 			{Name: "workspace", DurableDir: &ateapipb.DurableDirVolumeSource{}},
 		},
-		SnapshotsConfig: &ateapipb.SnapshotsConfig{
-			OnPause:         ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_DATA,
-			OnCommit:        ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_DATA,
-			StorageLocation: sc.SnapshotStorage,
-		},
-		SandboxConfig: &ateapipb.SandboxConfig{
-			SandboxClass: ateapipb.SandboxClass_SANDBOX_CLASS_MICROVM,
-			ConfigName:   sc.SandboxConfigName,
+		Resources: &ateapipb.ResourceRequirements{Limits: &ateapipb.Resources{
+			CpuMillicores: 2000,
+			MemoryBytes:   4 << 30,
+		}},
+		SnapshotConfig: &ateapipb.SnapshotConfig{
+			StorageLocation:   sc.SnapshotStorage,
+			PreferredFidelity: ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES,
 		},
 		WorkerSelector: &ateapipb.Selector{MatchLabels: sc.WorkerSelector},
 	}
@@ -106,7 +105,7 @@ func TestBuildActorTemplate_EgressTrustBundleSet(t *testing.T) {
 	image := "repo/image@sha256:" + strings.Repeat("d", 64)
 	sc := config.V1SubstrateConfig{EgressTrustBundle: "egress-mitm.ate.dev"}
 
-	tmpl := buildActorTemplate("scion-test", "scion-def456", image, sc, nil)
+	tmpl := mustBuildActorTemplate(t, "scion-test", "scion-def456", image, sc, nil)
 
 	wantVolumes := []*ateapipb.Volume{
 		{Name: "workspace", DurableDir: &ateapipb.DurableDirVolumeSource{}},
@@ -116,8 +115,8 @@ func TestBuildActorTemplate_EgressTrustBundleSet(t *testing.T) {
 				DataSources: []*ateapipb.SystemInfoDataSource{
 					{
 						TrustBundle: &ateapipb.TrustBundleDataSource{
-							Name: "egress-mitm.ate.dev",
-							Path: "trust-bundle.pem",
+							Names: []string{"egress-mitm.ate.dev"},
+							Path:  "trust-bundle.pem",
 						},
 					},
 				},
@@ -179,7 +178,7 @@ func TestBuildActorTemplate_EnvNamesMatchSharedTrustBundleVarNames(t *testing.T)
 	image := "repo/image@sha256:" + strings.Repeat("f", 64)
 	sc := config.V1SubstrateConfig{EgressTrustBundle: "egress-mitm.ate.dev"}
 
-	tmpl := buildActorTemplate("scion-test", "scion-fedcba", image, sc, nil)
+	tmpl := mustBuildActorTemplate(t, "scion-test", "scion-fedcba", image, sc, nil)
 
 	gotNames := make([]string, len(tmpl.GetContainers()[0].GetEnv()))
 	for i, e := range tmpl.GetContainers()[0].GetEnv() {
@@ -265,7 +264,7 @@ func substrateTemplateNameFixtures() []substrateTemplateNameFixture {
 func TestBuildActorTemplate_LaunchArgv0IsAlwaysAbsolute(t *testing.T) {
 	for _, tc := range substrateTemplateNameFixtures() {
 		t.Run(tc.name, func(t *testing.T) {
-			tmpl := buildActorTemplate("scion-test", "scion-abc123", tc.image, tc.sc, tc.resources)
+			tmpl := mustBuildActorTemplate(t, "scion-test", "scion-abc123", tc.image, tc.sc, tc.resources)
 			for _, c := range tmpl.Containers {
 				if len(c.Command) == 0 {
 					t.Fatalf("container %q has an empty Command", c.Name)
@@ -313,4 +312,13 @@ func TestSubstrateTemplateName_ChangesWhenEgressTrustBundleSet(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mustBuildActorTemplate(t *testing.T, atespace, templateName, imageDigest string, sc config.V1SubstrateConfig, resources *api.ResourceSpec) *ateapipb.ActorTemplate {
+	t.Helper()
+	tmpl, err := buildActorTemplate(atespace, templateName, imageDigest, sc, resources)
+	if err != nil {
+		t.Fatalf("buildActorTemplate() error = %v", err)
+	}
+	return tmpl
 }

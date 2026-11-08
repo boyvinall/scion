@@ -1271,7 +1271,8 @@ func startAgentViaHub(cmd *cobra.Command, hubCtx *HubContext, agentName, task st
 		util.Debugf("[workspace-scan] skipped: running in hub context (broker has workspace access)")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Runtimes without async launch (substrate) answer the create only once the agent exists.
+	ctx, cancel := context.WithTimeout(context.Background(), hubCreateRequestTimeout+time.Minute)
 	defer cancel()
 
 	// Check whether the agent already exists on the hub. A suspended or

@@ -76,6 +76,7 @@ func (c *callRecorder) list() []string {
 const fakeActorUID = "actor-uid-1"
 
 type fakeControlClient struct {
+	ateapipb.ControlClient
 	rec *callRecorder
 
 	createAtespace          func(*ateapipb.CreateAtespaceRequest) (*ateapipb.Atespace, error)
@@ -199,10 +200,6 @@ func (f *fakeControlClient) SuspendActor(ctx context.Context, in *ateapipb.Suspe
 	f.rec.record("SuspendActor")
 	return nil, status.Error(codes.Unimplemented, "not used in this fake")
 }
-func (f *fakeControlClient) PauseActor(ctx context.Context, in *ateapipb.PauseActorRequest, opts ...grpc.CallOption) (*ateapipb.PauseActorResponse, error) {
-	f.rec.record("PauseActor")
-	return nil, status.Error(codes.Unimplemented, "not used in this fake")
-}
 func (f *fakeControlClient) ResumeActor(ctx context.Context, in *ateapipb.ResumeActorRequest, opts ...grpc.CallOption) (*ateapipb.ResumeActorResponse, error) {
 	f.rec.record("ResumeActor")
 	return f.resumeActor(in)
@@ -230,10 +227,6 @@ func (f *fakeControlClient) UpdateActorEgressPolicy(ctx context.Context, in *ate
 func (f *fakeControlClient) DeleteActorEgressPolicy(ctx context.Context, in *ateapipb.DeleteActorEgressPolicyRequest, opts ...grpc.CallOption) (*ateapipb.EgressPolicy, error) {
 	f.rec.record("DeleteActorEgressPolicy")
 	return f.deleteActorEgressPolicy(in)
-}
-func (f *fakeControlClient) MintActorJWT(ctx context.Context, in *ateapipb.MintActorJWTRequest, opts ...grpc.CallOption) (*ateapipb.MintActorJWTResponse, error) {
-	f.rec.record("MintActorJWT")
-	return nil, status.Error(codes.Unimplemented, "not used in this fake")
 }
 func (f *fakeControlClient) MintActorCertificate(ctx context.Context, in *ateapipb.MintActorCertificateRequest, opts ...grpc.CallOption) (*ateapipb.MintActorCertificateResponse, error) {
 	f.rec.record("MintActorCertificate")
@@ -277,10 +270,6 @@ func (f *fakeControlClient) UpdateWorker(ctx context.Context, in *ateapipb.Updat
 }
 func (f *fakeControlClient) DeleteWorker(ctx context.Context, in *ateapipb.DeleteWorkerRequest, opts ...grpc.CallOption) (*ateapipb.Worker, error) {
 	f.rec.record("DeleteWorker")
-	return nil, status.Error(codes.Unimplemented, "not used in this fake")
-}
-func (f *fakeControlClient) DrainWorker(ctx context.Context, in *ateapipb.DrainWorkerRequest, opts ...grpc.CallOption) (*ateapipb.Worker, error) {
-	f.rec.record("DrainWorker")
 	return nil, status.Error(codes.Unimplemented, "not used in this fake")
 }
 func (f *fakeControlClient) ListWorkerActorAssignments(ctx context.Context, in *ateapipb.ListWorkerActorAssignmentsRequest, opts ...grpc.CallOption) (*ateapipb.ListWorkerActorAssignmentsResponse, error) {
@@ -1187,7 +1176,7 @@ func TestSubstrateTemplateName_Stable(t *testing.T) {
 // rather than lean on a default set.
 func TestBuildActorTemplate_SecurityContextGrantsExactlyRequiredCapabilities(t *testing.T) {
 	image := "repo/image@sha256:" + strings.Repeat("b", 64)
-	tmpl := buildActorTemplate("scion-test", "scion-abc123", image, config.V1SubstrateConfig{}, nil)
+	tmpl := mustBuildActorTemplate(t, "scion-test", "scion-abc123", image, config.V1SubstrateConfig{}, nil)
 
 	if len(tmpl.GetContainers()) != 1 {
 		t.Fatalf("Containers = %d, want 1", len(tmpl.GetContainers()))
@@ -1223,7 +1212,7 @@ func TestBuildActorTemplate_WakeupProbeTargetsServeHealthz(t *testing.T) {
 		{},
 		{SandboxClass: "microvm", EgressTrustBundle: "egress-mitm.ate.dev"},
 	} {
-		tmpl := buildActorTemplate("scion-test", "scion-abc123", image, sc, nil)
+		tmpl := mustBuildActorTemplate(t, "scion-test", "scion-abc123", image, sc, nil)
 		if len(tmpl.GetContainers()) != 1 {
 			t.Fatalf("Containers = %d, want 1", len(tmpl.GetContainers()))
 		}
@@ -1251,10 +1240,10 @@ func TestBuildActorTemplate_WakeupProbeIsFreshPerCall(t *testing.T) {
 	cfg := config.V1SubstrateConfig{SandboxClass: "gvisor"}
 	before := substrateTemplateName(image, cfg, nil)
 
-	first := buildActorTemplate("scion-test", "scion-abc123", image, cfg, nil)
+	first := mustBuildActorTemplate(t, "scion-test", "scion-abc123", image, cfg, nil)
 	first.GetContainers()[0].GetWakeupProbe().GetHttpGet().Path = "/mutated"
 
-	second := buildActorTemplate("scion-test", "scion-abc123", image, cfg, nil)
+	second := mustBuildActorTemplate(t, "scion-test", "scion-abc123", image, cfg, nil)
 	if got := second.GetContainers()[0].GetWakeupProbe().GetHttpGet().GetPath(); got != substrateHealthzPath {
 		t.Errorf("second template's WakeupProbe path = %q after mutating the first, want %q", got, substrateHealthzPath)
 	}
@@ -2376,8 +2365,8 @@ func TestSubstrateList_Pagination(t *testing.T) {
 
 	var pageTokensSeen []string
 	fc.listActors = func(req *ateapipb.ListActorsRequest) (*ateapipb.ListActorsResponse, error) {
-		pageTokensSeen = append(pageTokensSeen, req.GetPageToken())
-		switch req.GetPageToken() {
+		pageTokensSeen = append(pageTokensSeen, req.GetOptions().GetPageToken())
+		switch req.GetOptions().GetPageToken() {
 		case "":
 			return &ateapipb.ListActorsResponse{
 				Actors: []*ateapipb.Actor{
@@ -2395,7 +2384,7 @@ func TestSubstrateList_Pagination(t *testing.T) {
 				NextPageToken: "",
 			}, nil
 		default:
-			t.Fatalf("unexpected page token %q", req.GetPageToken())
+			t.Fatalf("unexpected page token %q", req.GetOptions().GetPageToken())
 			return nil, nil
 		}
 	}

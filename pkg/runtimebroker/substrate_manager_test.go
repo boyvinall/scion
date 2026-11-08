@@ -157,7 +157,7 @@ func (f *fakeSubstrateControlClient) CreateActor(ctx context.Context, in *ateapi
 func (f *fakeSubstrateControlClient) CreateActorEgressPolicy(ctx context.Context, in *ateapipb.CreateActorEgressPolicyRequest, opts ...grpc.CallOption) (*ateapipb.EgressPolicy, error) {
 	var patterns []string
 	for _, rule := range in.GetEgressPolicy().GetRules() {
-		patterns = append(patterns, rule.GetHostnames().GetPatterns()...)
+		patterns = append(patterns, rule.GetTlsPassthrough().GetHostnames()...)
 	}
 	f.recorder.record(in.GetActor().GetName(), patterns)
 	return &ateapipb.EgressPolicy{}, nil
