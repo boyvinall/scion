@@ -53,10 +53,12 @@ const (
 
 // substrateAgentRecord holds the fields List needs that ListActors cannot
 // return (Substrate actors carry no labels — substrate-runtime.md §4), synthesised
-// from the broker's own record of what it passed to Run. A broker restart
-// loses this for actors it did not create in this process lifetime
-// (substrate-runtime.md §4); a ConfigMap-backed store is future work.
+// from the broker's own record of what it passed to Run. The production
+// runtime persists records and their control tokens (substrate_state_store.go)
+// so they survive a broker restart.
 type substrateAgentRecord struct {
+	// ID is the "<atespace>/<actor>" key of the actor's control token.
+	ID            string
 	Labels        map[string]string
 	Template      string
 	HarnessConfig string
@@ -295,6 +297,8 @@ func newSubstrateRuntimeFromConfig(sc config.V1SubstrateConfig) (*SubstrateRunti
 	if err != nil {
 		return nil, fmt.Errorf("substrate: build Kubernetes client: %w", err)
 	}
+
+	enableSubstrateStateStore()
 
 	ctx := context.Background()
 	conn, err := substrate.Dial(ctx, k8sClient.Clientset, substrate.DialerConfig{
@@ -596,6 +600,7 @@ func (r *SubstrateRuntime) Run(ctx context.Context, cfg RunConfig) (string, erro
 	substrateControlTokens[id] = controlToken
 	substrateExecSecrets[id] = substrateSecretCandidates(cfg)
 	substrateAgentRecords[actorUID] = &substrateAgentRecord{
+		ID:     id,
 		Labels: cfg.Labels,
 		// scion.harness_config is the same label key
 		// CloudRunSandboxRuntime.Run populates HarnessConfig from — see
@@ -607,6 +612,7 @@ func (r *SubstrateRuntime) Run(ctx context.Context, cfg RunConfig) (string, erro
 		ProjectPath:   projectPath,
 		Image:         cfg.Image,
 	}
+	saveSubstrateStateLocked()
 	substrateAgentStateMu.Unlock()
 
 	// Step 9.
@@ -678,6 +684,7 @@ func (r *SubstrateRuntime) Delete(ctx context.Context, ref RunRef) error {
 	if uid != "" {
 		delete(substrateAgentRecords, uid)
 	}
+	saveSubstrateStateLocked()
 	substrateAgentStateMu.Unlock()
 	return nil
 }
