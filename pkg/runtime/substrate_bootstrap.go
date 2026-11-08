@@ -622,8 +622,14 @@ func waitForHealthz(ctx context.Context, router *substrate.RouterClient, atespac
 		if err == nil && state == wantState {
 			return nil
 		}
+		aborted := func(cause error) error {
+			if err != nil {
+				return fmt.Errorf("substrate: %s/%s wait for healthz state %q aborted: %w (last error: %v)", atespace, actorName, wantState, cause, err)
+			}
+			return fmt.Errorf("substrate: %s/%s wait for healthz state %q aborted: %w", atespace, actorName, wantState, cause)
+		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return fmt.Errorf("substrate: %s/%s wait for healthz state %q aborted: %w", atespace, actorName, wantState, ctxErr)
+			return aborted(ctxErr)
 		}
 		if time.Now().After(deadline) {
 			if err != nil {
@@ -631,8 +637,8 @@ func waitForHealthz(ctx context.Context, router *substrate.RouterClient, atespac
 			}
 			return fmt.Errorf("substrate: %s/%s did not reach healthz state %q within %s (last state: %q)", atespace, actorName, wantState, timeout, state)
 		}
-		if err := sleep(ctx, backoff); err != nil {
-			return fmt.Errorf("substrate: %s/%s wait for healthz state %q aborted: %w", atespace, actorName, wantState, err)
+		if sleepErr := sleep(ctx, backoff); sleepErr != nil {
+			return aborted(sleepErr)
 		}
 		if backoff < maxBackoff {
 			backoff *= 2
