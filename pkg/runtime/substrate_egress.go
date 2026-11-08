@@ -359,6 +359,9 @@ func hostFromURL(raw string) string {
 	return u.Hostname()
 }
 
+// substrateEgressPolicyName is the only name Substrate allows for an actor's egress policy.
+const substrateEgressPolicyName = "default"
+
 // buildEgressPolicy builds the CreateActorEgressPolicyRequest for actor
 // atespace/actorName, with a single EgressRule matching any of hostnames
 // (substrate-runtime.md §7). "default" is the only permitted egress
@@ -369,7 +372,7 @@ func buildEgressPolicy(atespace, actorName string, hostnames []string) *ateapipb
 	return &ateapipb.CreateActorEgressPolicyRequest{
 		Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
 		EgressPolicy: &ateapipb.EgressPolicy{
-			Metadata: &ateapipb.ResourceMetadata{Atespace: atespace, Name: "default"},
+			Metadata: &ateapipb.ResourceMetadata{Atespace: atespace, Name: substrateEgressPolicyName},
 			Rules: []*ateapipb.EgressRule{
 				{
 					TlsPassthrough: &ateapipb.TlsPassthroughRule{

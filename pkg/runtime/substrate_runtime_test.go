@@ -127,7 +127,10 @@ func newFakeControlClient(rec *callRecorder) *fakeControlClient {
 		createActorEgressPolicy: func(*ateapipb.CreateActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
 			return &ateapipb.EgressPolicy{}, nil
 		},
-		deleteActorEgressPolicy: func(*ateapipb.DeleteActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
+		deleteActorEgressPolicy: func(in *ateapipb.DeleteActorEgressPolicyRequest) (*ateapipb.EgressPolicy, error) {
+			if in.GetName() != "default" {
+				return nil, status.Error(codes.InvalidArgument, "name: Required value")
+			}
 			return &ateapipb.EgressPolicy{}, nil
 		},
 		resumeActor: func(*ateapipb.ResumeActorRequest) (*ateapipb.ResumeActorResponse, error) {

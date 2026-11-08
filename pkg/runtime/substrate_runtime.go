@@ -482,6 +482,7 @@ func (r *SubstrateRuntime) Run(ctx context.Context, cfg RunConfig) (string, erro
 		defer cancel()
 		_, _ = r.client.DeleteActorEgressPolicy(cleanupCtx, &ateapipb.DeleteActorEgressPolicyRequest{
 			Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
+			Name:  substrateEgressPolicyName,
 		})
 		_, _ = r.client.DeleteActor(cleanupCtx, &ateapipb.DeleteActorRequest{
 			Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
@@ -650,6 +651,7 @@ func (r *SubstrateRuntime) Delete(ctx context.Context, ref RunRef) error {
 
 	if _, err := r.client.DeleteActorEgressPolicy(ctx, &ateapipb.DeleteActorEgressPolicyRequest{
 		Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
+		Name:  substrateEgressPolicyName,
 	}); err != nil && status.Code(err) != codes.NotFound {
 		return fmt.Errorf("substrate: delete egress policy for %s: %w", id, err)
 	}
