@@ -259,6 +259,10 @@ func substrateEgressHostnames(cfg RunConfig, env map[string]string, sc config.V1
 			return nil, fmt.Errorf("substrate: trusted hub endpoint %q resolves to IP address %q; configure the hub endpoint with a DNS hostname — substrate's egress policy supports hostname patterns only, not IP addresses", cfg.TrustedHubEndpoint, trustedHubHost)
 		}
 		add(trustedHubHost)
+		// The sandbox's DNS relay answers only policy names, and cluster DNS serves a Service only under its search-domain expansion.
+		if strings.HasSuffix(trustedHubHost, ".svc") {
+			add(trustedHubHost + ".cluster.local")
+		}
 	}
 	if finalHubHost := hostFromURLEnv(env, "SCION_HUB_ENDPOINT", "SCION_HUB_URL"); finalHubHost != "" && finalHubHost != trustedHubHost {
 		slog.Warn("substrate: ignoring agent env hub endpoint that does not match the operator-configured hub",

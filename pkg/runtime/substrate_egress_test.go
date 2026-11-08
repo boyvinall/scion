@@ -477,6 +477,19 @@ func TestSubstrateEgressHostnames_InClusterHubStillAllowed(t *testing.T) {
 	}
 }
 
+func TestSubstrateEgressHostnames_SvcHubAddsClusterLocalName(t *testing.T) {
+	cfg := RunConfig{TrustedHubEndpoint: "https://scion-hub.scion-system.svc"}
+	hosts, err := substrateEgressHostnames(cfg, map[string]string{}, config.V1SubstrateConfig{})
+	if err != nil {
+		t.Fatalf("substrateEgressHostnames() error = %v", err)
+	}
+	for _, want := range []string{"scion-hub.scion-system.svc", "scion-hub.scion-system.svc.cluster.local"} {
+		if !containsHost(hosts, want) {
+			t.Errorf("substrateEgressHostnames() = %v, want %q present", hosts, want)
+		}
+	}
+}
+
 // TestSubstrateEgressHostnames_IPLiteralTrustedHubRefused proves an
 // IP-literal trusted hub endpoint fails here, as a clear config error naming
 // the offending value, rather than reaching CreateActorEgressPolicy
